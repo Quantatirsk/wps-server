@@ -243,7 +243,7 @@ Swagger UI 路径是 `/docs`。
   - 默认值：`52428800`
   - 单文件上传大小上限
 - `WPS_BATCH_MAX_FILES`
-  - 默认值：`10`
+  - 默认值：`12`
   - batch 接口允许的最大文件数
 - `WPS_WORKER_COUNT`
   - 默认值：`auto`
