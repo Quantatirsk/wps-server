@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.openapi.docs import (
     get_swagger_ui_html,
     get_swagger_ui_oauth2_redirect_html,
 )
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.convert_routes import router as convert_router
@@ -38,6 +40,23 @@ async def lifespan(_: FastAPI):
     yield
 
 
+def _patch_binary_schema(node: Any) -> None:
+    if isinstance(node, dict):
+        if (
+            node.get("type") == "string"
+            and node.get("contentMediaType") == "application/octet-stream"
+        ):
+            node["format"] = "binary"
+            node.pop("contentMediaType", None)
+        for value in node.values():
+            _patch_binary_schema(value)
+        return
+
+    if isinstance(node, list):
+        for item in node:
+            _patch_binary_schema(item)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     application = FastAPI(
@@ -47,6 +66,22 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
     application.openapi_version = "3.0.3"
+
+    def custom_openapi() -> dict[str, Any]:
+        if application.openapi_schema:
+            return application.openapi_schema
+
+        openapi_schema = get_openapi(
+            title=application.title,
+            version="1.0.0",
+            openapi_version=application.openapi_version,
+            routes=application.routes,
+        )
+        _patch_binary_schema(openapi_schema)
+        application.openapi_schema = openapi_schema
+        return application.openapi_schema
+
+    application.openapi = custom_openapi
 
     @application.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
