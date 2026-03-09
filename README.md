@@ -160,6 +160,23 @@ docker run --rm \
 ./scripts/smoke_test_api.sh tests/files/经责审计报告示例.docx
 ```
 
+## Dispatcher 模式
+
+如果你想把 `docx` 批量吞吐提高到 `2x~4x`，推荐把当前服务作为轻量 dispatcher 使用，再横向起多个 worker 实例。
+
+当前实现保持这些原则：
+
+- 单文件接口仍然走本地 WPS 转换
+- 批量接口在配置了 worker 列表后，会按轮询把文件分发到多个远程 worker
+- 每个 worker 仍保持单实例内同文档族串行，稳定性边界不变
+
+典型部署方式：
+
+- 1 个 dispatcher
+- 2~4 个 worker
+- dispatcher 的 `POST /api/v1/convert-to-pdf/batch` 负责分发和打包
+- worker 继续暴露同一个 `POST /api/v1/convert-to-pdf` 单文件接口
+
 ## 环境变量
 
 - `WPS_WORKSPACE_ROOT`: 工作目录根路径，默认 `/workspace`
@@ -167,6 +184,15 @@ docker run --rm \
 - `WPS_CLEANUP_MAX_AGE_SECONDS`: 历史任务清理阈值，默认 `86400`
 - `WPS_MAX_UPLOAD_SIZE_BYTES`: 上传大小上限，默认 `52428800`
 - `WPS_BATCH_MAX_FILES`: 批量文件数上限，默认 `10`
+- `WPS_BATCH_WORKER_URLS`: 逗号分隔的 worker 基础地址列表；配置后批量接口会启用远程分发
+- `WPS_DISPATCHER_REQUEST_TIMEOUT_SECONDS`: dispatcher 调 worker 的超时秒数，默认 `180`
+
+示例：
+
+```bash
+export WPS_BATCH_WORKER_URLS=http://10.0.0.11:8000,http://10.0.0.12:8000,http://10.0.0.13:8000
+export WPS_DISPATCHER_REQUEST_TIMEOUT_SECONDS=180
+```
 
 ## 当前实现边界
 
