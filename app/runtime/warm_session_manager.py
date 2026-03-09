@@ -305,7 +305,7 @@ class FamilyWorker:
                 self.family,
                 self._session_process_pid,
             )
-            self._shutdown_process(force=True)
+            await self._restart_and_prewarm(timeout_seconds)
             return True
         if cpu_percent is None:
             return False
@@ -332,6 +332,10 @@ class FamilyWorker:
             self.worker_name,
             self._session_process_pid,
         )
+        await self._restart_and_prewarm(timeout_seconds)
+        return True
+
+    async def _restart_and_prewarm(self, timeout_seconds: int) -> None:
         self._shutdown_process(force=True)
         try:
             self._ensure_process()
@@ -343,7 +347,6 @@ class FamilyWorker:
             self._shutdown_process(force=True)
             raise
         self._mark_session_alive(response["processPid"])
-        return True
 
     def _mark_session_alive(self, process_pid: int | None) -> None:
         self._last_used_monotonic = time.monotonic()
@@ -742,7 +745,15 @@ def _handle_convert_command(
                 worker_name,
                 jobs_completed,
             )
-            return _recycle_worker_session(adapter, session)
+            return _replace_worker_session(
+                adapter=adapter,
+                startup_lock=startup_lock,
+                logger=logger,
+                family=family,
+                worker_name=worker_name,
+                session=session,
+                phase="jobs_recycle",
+            )
         return session, jobs_completed
     except AppError as exc:
         logger.exception(
@@ -761,13 +772,52 @@ def _handle_convert_command(
         )
         _send_worker_error_response(connection, "WpsConversionError", str(exc))
 
-    return _recycle_worker_session(adapter, session)
+    return _replace_worker_session(
+        adapter=adapter,
+        startup_lock=startup_lock,
+        logger=logger,
+        family=family,
+        worker_name=worker_name,
+        session=session,
+        phase="failure_recycle",
+    )
 
 
 def _recycle_worker_session(adapter: BaseWpsAdapter, session: Any) -> tuple[None, int]:
     if session is not None:
         _stop_session_safely(adapter, session)
     return None, 0
+
+
+def _replace_worker_session(
+    adapter: BaseWpsAdapter,
+    startup_lock: Any,
+    logger: Any,
+    family: str,
+    worker_name: str,
+    session: Any,
+    phase: str,
+) -> tuple[Any, int]:
+    if session is not None:
+        _stop_session_safely(adapter, session)
+    try:
+        session = _start_worker_session(
+            adapter=adapter,
+            startup_lock=startup_lock,
+            logger=logger,
+            family=family,
+            worker_name=worker_name,
+            phase=phase,
+        )
+    except Exception:
+        logger.exception(
+            "warm_worker_replace_failed family=%s worker_name=%s phase=%s",
+            family,
+            worker_name,
+            phase,
+        )
+        return None, 0
+    return session, 0
 
 
 def _start_worker_session(
