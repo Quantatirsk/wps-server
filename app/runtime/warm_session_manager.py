@@ -87,7 +87,7 @@ class FamilyWorker:
         timeout_seconds: int,
     ) -> WarmConversionResult:
         async with self._lock:
-            self._recycle_if_idle()
+            await self._refresh_if_idle(timeout_seconds)
             self._ensure_process()
             started_at = time.perf_counter()
             try:
@@ -134,7 +134,8 @@ class FamilyWorker:
 
     async def prewarm(self, timeout_seconds: int) -> None:
         async with self._lock:
-            self._recycle_if_idle()
+            if await self._refresh_if_idle(timeout_seconds):
+                return
             self._ensure_process()
             started_at = time.perf_counter()
             try:
@@ -166,7 +167,7 @@ class FamilyWorker:
             return
 
         async with self._lock:
-            if self._recycle_if_idle():
+            if await self._refresh_if_idle(timeout_seconds):
                 return
             await self._recycle_if_hot_idle(timeout_seconds)
 
@@ -274,7 +275,7 @@ class FamilyWorker:
         error_cls = ERROR_TYPES.get(error_type, WpsConversionError)
         return error_cls(message)
 
-    def _recycle_if_idle(self) -> bool:
+    async def _refresh_if_idle(self, timeout_seconds: int) -> bool:
         if self._last_used_monotonic is None:
             return False
         idle_seconds = time.monotonic() - self._last_used_monotonic
@@ -286,6 +287,22 @@ class FamilyWorker:
             idle_seconds,
         )
         self._shutdown_process(force=False)
+        try:
+            self._ensure_process()
+            response = await asyncio.to_thread(
+                self._send_prewarm_request,
+                timeout_seconds,
+            )
+        except Exception:
+            self._shutdown_process(force=True)
+            raise
+        self._mark_session_alive(response["processPid"])
+        self.logger.info(
+            "warm_worker_rewarmed_idle family=%s worker_name=%s process_pid=%s",
+            self.family,
+            self.worker_name,
+            response["processPid"],
+        )
         return True
 
     async def _recycle_if_hot_idle(self, timeout_seconds: int) -> None:
