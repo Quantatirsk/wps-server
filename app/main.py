@@ -30,6 +30,7 @@ async def lifespan(_: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     application = FastAPI(title=settings.service_name, lifespan=lifespan)
+    application.openapi_version = "3.0.3"
 
     @application.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:

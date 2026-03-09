@@ -14,7 +14,11 @@ def get_conversion_service(settings: Settings = Depends(get_settings)) -> Conver
     return ConversionService(settings=settings)
 
 
-@router.post("/convert-to-pdf")
+@router.post(
+    "/convert-to-pdf",
+    summary="Convert To Pdf",
+    description="Upload one supported office document as multipart/form-data with field name `file`, then receive a PDF file stream.",
+)
 async def convert_to_pdf(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -30,7 +34,11 @@ async def convert_to_pdf(
     )
 
 
-@router.post("/convert-to-pdf/batch")
+@router.post(
+    "/convert-to-pdf/batch",
+    summary="Convert To Pdf Batch",
+    description="Upload multiple supported office documents as multipart/form-data. Repeat the `files` field for each file, then receive a ZIP archive.",
+)
 async def convert_to_pdf_batch(
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
