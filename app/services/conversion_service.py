@@ -7,11 +7,11 @@ import time
 
 from fastapi import UploadFile
 
+from app.adapters.base import BaseWpsAdapter
 from app.adapters.presentation_adapter import PresentationAdapter
 from app.adapters.spreadsheet_adapter import SpreadsheetAdapter
 from app.adapters.writer_adapter import WriterAdapter
 from app.config import Settings
-from app.services.conversion_registry import ConversionRegistry, ConversionRoute
 from app.utils.errors import (
     ConversionTimeoutError,
     InvalidInputError,
@@ -39,7 +39,13 @@ from app.utils.locks import (
     get_writer_lock,
 )
 from app.utils.logging import get_logger
-from app.utils.pdf import PdfOptimizationOptions, optimize_pdf_in_place
+
+
+@dataclass(frozen=True)
+class ConversionRoute:
+    document_family: str
+    adapter: BaseWpsAdapter
+    lock: asyncio.Lock
 
 
 @dataclass(frozen=True)
@@ -57,20 +63,40 @@ class ConversionJobResult:
 @dataclass(frozen=True)
 class BatchConversionResult:
     batch_id: str
-    batch_dir: Path
     zip_path: Path
     cleanup_paths: list[Path]
-    item_count: int
+
+
+WRITER_ROUTE = ConversionRoute(
+    document_family="writer",
+    adapter=WriterAdapter(),
+    lock=get_writer_lock(),
+)
+PRESENTATION_ROUTE = ConversionRoute(
+    document_family="presentation",
+    adapter=PresentationAdapter(),
+    lock=get_presentation_lock(),
+)
+SPREADSHEET_ROUTE = ConversionRoute(
+    document_family="spreadsheet",
+    adapter=SpreadsheetAdapter(),
+    lock=get_spreadsheet_lock(),
+)
+
+ROUTES_BY_SUFFIX: dict[str, ConversionRoute] = {
+    ".doc": WRITER_ROUTE,
+    ".docx": WRITER_ROUTE,
+    ".ppt": PRESENTATION_ROUTE,
+    ".pptx": PRESENTATION_ROUTE,
+    ".xls": SPREADSHEET_ROUTE,
+    ".xlsx": SPREADSHEET_ROUTE,
+}
+SUPPORTED_SUFFIXES = ", ".join(sorted(ROUTES_BY_SUFFIX))
 
 
 class ConversionService:
-    def __init__(
-        self,
-        settings: Settings,
-        registry: ConversionRegistry | None = None,
-    ) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.registry = registry or self._build_default_registry()
         self.logger = get_logger(__name__)
 
     async def convert_file_to_pdf(self, upload_file: UploadFile) -> ConversionJobResult:
@@ -92,12 +118,6 @@ class ConversionService:
             if job_paths.job_dir.exists() and not job_paths.output_path.exists():
                 cleanup_job_dir(job_paths.job_dir)
             raise
-
-    async def convert_word_to_pdf(self, upload_file: UploadFile) -> ConversionJobResult:
-        route = self._get_route_or_raise(upload_file.filename)
-        if route.document_family != "writer":
-            raise UnsupportedFormatError("only .doc and .docx files are supported")
-        return await self.convert_file_to_pdf(upload_file)
 
     async def convert_files_to_pdf_batch(
         self,
@@ -122,20 +142,25 @@ class ConversionService:
         successful_results = [
             result for result in results if isinstance(result, ConversionJobResult)
         ]
-
         if exceptions:
             cleanup_paths([result.job_dir for result in successful_results])
             raise exceptions[0]
 
         batch_paths = build_batch_paths(self.settings)
-        cleanup_targets = [batch_paths.batch_dir, *[result.job_dir for result in successful_results]]
+        cleanup_targets = [
+            batch_paths.batch_dir,
+            *[result.job_dir for result in successful_results],
+        ]
 
         try:
-            manifest = self._build_batch_manifest(batch_paths.batch_id, successful_results)
-            write_json_file(batch_paths.manifest_path, manifest)
-
-            archive_entries = self._build_batch_archive_entries(successful_results, batch_paths)
-            create_zip_archive(batch_paths.zip_path, archive_entries)
+            write_json_file(
+                batch_paths.manifest_path,
+                self._build_batch_manifest(batch_paths.batch_id, successful_results),
+            )
+            create_zip_archive(
+                batch_paths.zip_path,
+                self._build_batch_archive_entries(successful_results, batch_paths),
+            )
         except Exception:
             cleanup_paths(cleanup_targets)
             raise
@@ -147,10 +172,8 @@ class ConversionService:
         )
         return BatchConversionResult(
             batch_id=batch_paths.batch_id,
-            batch_dir=batch_paths.batch_dir,
             zip_path=batch_paths.zip_path,
             cleanup_paths=cleanup_targets,
-            item_count=len(successful_results),
         )
 
     async def _run_conversion(
@@ -192,8 +215,6 @@ class ConversionService:
             cleanup_job_dir(job_paths.job_dir)
             raise WpsConversionError("conversion completed without output file")
 
-        self._optimize_pdf(job_paths.output_path)
-
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         write_job_metadata(
             job_paths,
@@ -228,21 +249,18 @@ class ConversionService:
         )
 
     def _get_route_or_raise(self, filename: str | None) -> ConversionRoute:
-        try:
-            return self.registry.get_route(filename)
-        except ValueError as exc:
-            raise UnsupportedFormatError(str(exc)) from exc
+        suffix = Path(filename or "").suffix.lower()
+        route = ROUTES_BY_SUFFIX.get(suffix)
+        if route is None:
+            raise UnsupportedFormatError(
+                f"unsupported file format, supported formats: {SUPPORTED_SUFFIXES}"
+            )
+        return route
 
     def _validate_file_size(self, size: int, job_paths: JobPaths) -> None:
         if size > self.settings.max_upload_size_bytes:
             cleanup_job_dir(job_paths.job_dir)
             raise PayloadTooLargeError("uploaded file exceeds configured size limit")
-
-    def _optimize_pdf(self, output_path: Path) -> None:
-        optimize_pdf_in_place(
-            output_path,
-            PdfOptimizationOptions(enabled=self.settings.pdf_use_ghostscript),
-        )
 
     def _build_batch_manifest(
         self,
@@ -297,27 +315,3 @@ class ConversionService:
         deduped = f"{path.parent}/{path.stem}_{index}{path.suffix}"
         used_names.add(deduped)
         return deduped
-
-    def _build_default_registry(self) -> ConversionRegistry:
-        return ConversionRegistry(
-            routes=[
-                ConversionRoute(
-                    document_family="writer",
-                    supported_suffixes=frozenset({".doc", ".docx"}),
-                    adapter=WriterAdapter(),
-                    lock=get_writer_lock(),
-                ),
-                ConversionRoute(
-                    document_family="presentation",
-                    supported_suffixes=frozenset({".ppt", ".pptx"}),
-                    adapter=PresentationAdapter(),
-                    lock=get_presentation_lock(),
-                ),
-                ConversionRoute(
-                    document_family="spreadsheet",
-                    supported_suffixes=frozenset({".xls", ".xlsx"}),
-                    adapter=SpreadsheetAdapter(),
-                    lock=get_spreadsheet_lock(),
-                ),
-            ]
-        )

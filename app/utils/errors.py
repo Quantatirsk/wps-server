@@ -41,12 +41,6 @@ class PayloadTooLargeError(AppError):
     message = "uploaded file is too large"
 
 
-class WpsEnvironmentError(AppError):
-    code = "WPS_ENVIRONMENT_ERROR"
-    status_code = 503
-    message = "wps runtime environment is not ready"
-
-
 class WpsStartupError(AppError):
     code = "WPS_STARTUP_FAILED"
     status_code = 503
@@ -62,7 +56,7 @@ class WpsOpenDocumentError(AppError):
 class WpsConversionError(AppError):
     code = "WPS_CONVERSION_FAILED"
     status_code = 500
-    message = "failed to convert word document to pdf"
+    message = "failed to convert document to pdf"
 
 
 class ConversionTimeoutError(AppError):

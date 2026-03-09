@@ -8,11 +8,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=zh_CN.UTF-8 \
     LC_ALL=zh_CN.UTF-8 \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    WPS_PDF_USE_GHOSTSCRIPT=true \
     WPS_BATCH_MAX_FILES=10
 
 ARG WPS_DEB_URL_BASE="https://wps-linux-personal.wpscdn.cn/wps/download/ep/Linux2023/24722/wps-office_12.1.2.24722.AK.preread.sw_612408_amd64.deb"
 ARG WPS_DOWNLOAD_KEY="7f8faaaa468174dc1c9cd62e5f218a5b"
+ARG FONTS_ZIP_URL="https://software.cdn.vect.one/Fonts.zip"
 
 WORKDIR /app
 
@@ -21,11 +21,11 @@ RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.ustc.edu.cn@g' /etc/apt/sources.l
     apt-get install -y \
         curl \
         wget \
+        unzip \
         bsdextrautils \
         xdg-utils \
         x11-utils \
         dbus-x11 \
-        ghostscript \
         python3 \
         python3-pip \
         python3-venv \
@@ -78,11 +78,15 @@ RUN WPS_URI="$(python3 -c 'from urllib.parse import urlparse; import os; print(u
     rm -f /tmp/wps.deb && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install \
-    fastapi \
-    uvicorn[standard] \
-    python-multipart \
-    pywpsrpc -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+RUN wget -O /tmp/Fonts.zip "${FONTS_ZIP_URL}" && \
+    mkdir -p /usr/local/share/fonts/zhFonts && \
+    unzip -oq /tmp/Fonts.zip -d /usr/local/share/fonts/zhFonts && \
+    rm -f /tmp/Fonts.zip && \
+    fc-cache -f /usr/local/share/fonts/zhFonts && \
+    fc-cache -f
+
+COPY requirements.txt /app/requirements.txt
+RUN pip3 install -r /app/requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 
 RUN mkdir -p /root/.config/Kingsoft
 COPY Office.conf /root/.config/Kingsoft/Office.conf

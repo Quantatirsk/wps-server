@@ -6,10 +6,6 @@ from pathlib import Path
 import os
 
 
-def _get_bool_env(name: str, default: str) -> bool:
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
-
-
 @dataclass(frozen=True)
 class Settings:
     api_prefix: str
@@ -21,7 +17,6 @@ class Settings:
     cleanup_max_age_seconds: int
     max_upload_size_bytes: int
     batch_max_files: int
-    pdf_use_ghostscript: bool
 
 
 @lru_cache(maxsize=1)
@@ -45,5 +40,4 @@ def get_settings() -> Settings:
             os.getenv("WPS_MAX_UPLOAD_SIZE_BYTES", str(50 * 1024 * 1024))
         ),
         batch_max_files=int(os.getenv("WPS_BATCH_MAX_FILES", "10")),
-        pdf_use_ghostscript=_get_bool_env("WPS_PDF_USE_GHOSTSCRIPT", "true"),
     )

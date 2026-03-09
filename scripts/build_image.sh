@@ -14,6 +14,7 @@ read -r -p "是否使用 --no-cache 构建? [y/N]: " no_cache_answer
 no_cache_answer="${no_cache_answer:-N}"
 
 read -r -p "是否覆盖 WPS_DEB_URL_BASE? 留空则使用 Dockerfile 默认值: " wps_deb_url_base
+read -r -p "是否覆盖 FONTS_ZIP_URL? 留空则使用 Dockerfile 默认值: " fonts_zip_url
 
 build_cmd=(docker build -t "${image_name}:${image_tag}")
 
@@ -25,6 +26,10 @@ esac
 
 if [[ -n "${wps_deb_url_base}" ]]; then
   build_cmd+=(--build-arg "WPS_DEB_URL_BASE=${wps_deb_url_base}")
+fi
+
+if [[ -n "${fonts_zip_url}" ]]; then
+  build_cmd+=(--build-arg "FONTS_ZIP_URL=${fonts_zip_url}")
 fi
 
 build_cmd+=(.)

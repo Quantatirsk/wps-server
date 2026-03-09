@@ -1,49 +1,46 @@
 # WPS API Service
 
-这是一个基于 `WPS Office for Linux + pywpsrpc + FastAPI` 的无头文档转换服务原型。
+这是一个基于 `WPS Office for Linux + pywpsrpc + FastAPI` 的无头 PDF 转换服务。
 
-当前已支持：
+它的职责很单一：
 
-- `GET /api/v1/healthz`
-- `GET /api/v1/readyz`
-- `POST /api/v1/convert-to-pdf`
-- `POST /api/v1/convert-to-pdf/batch`
+- 接收 `doc` / `docx`
+- 接收 `ppt` / `pptx`
+- 接收 `xls` / `xlsx`
+- 调用 WPS 导出 PDF
+- 直接返回 PDF 或批量 ZIP
 
-## 项目定位
+当前版本刻意保持 KISS：
 
-本仓库现在包含三层内容：
+- 只做 `convert to pdf`
+- 不做任务队列
+- 不做数据库
+- 不做 Ghostscript 后处理
+- 不改 `pywpsrpc` 上游源码
 
-- `pywpsrpc/`：上游 Python 绑定源码与示例，作为能力参考与依赖来源
-- `Dockerfile` + `docker/entrypoint.sh`：WPS 运行时容器基础设施
-- `app/`：本项目新增的 FastAPI 服务层
+## 为什么现在不再做 PDF 后处理
 
-推荐的职责边界是：
+这轮排查后的结论已经很明确：
 
-- `pywpsrpc` 负责 WPS RPC 调用
-- `app/` 负责 API、任务目录、日志、超时、互斥锁、错误处理
+- `docx -> pdf` 体积膨胀的根因，不是“Linux WPS 天然导出很大”
+- 真正根因是部分字体文件的嵌入权限不对，导致正文文本被光栅化为图片
+- 典型案例是旧版 `方正仿宋简体`，嵌入权限为 `0x2`
+- 当替换为可嵌入版本后，PDF 体积和转换速度都会恢复正常
 
-## 目录说明
+所以当前策略已经收敛为：
 
-```text
-.
-├── app/
-│   ├── api/
-│   ├── adapters/
-│   ├── services/
-│   └── utils/
-├── docker/
-├── docs/
-├── scripts/
-├── Dockerfile
-├── Office.conf
-└── README.md
-```
+1. 镜像内置中文字体包
+2. 启动时刷新字体缓存
+3. WPS 直接导出 PDF
+4. 服务直接返回结果
 
-## 当前 API
+这比“先导出，再额外压缩十几秒”更符合 KISS 和 Fail-Fast。
+
+## API
 
 ### `GET /api/v1/healthz`
 
-用于探测服务进程是否存活。
+进程存活检查。
 
 响应示例：
 
@@ -53,21 +50,17 @@
 
 ### `GET /api/v1/readyz`
 
-用于探测运行环境是否具备接单能力。
-
-会检查：
+运行环境检查。当前只验证真正必需的条件：
 
 - `jobs` 目录可写
 - `runtime` 目录可写
-- `DISPLAY` 是否配置
-- `XDG_RUNTIME_DIR` 是否配置
-- `pywpsrpc` 是否可导入
+- `DISPLAY` 已配置
+- `XDG_RUNTIME_DIR` 已配置
+- `pywpsrpc` 可导入
 
 ### `POST /api/v1/convert-to-pdf`
 
-上传单个受支持文件，返回 PDF 文件流。
-
-请求示例：
+上传单个文件并返回 PDF。
 
 ```bash
 curl -X POST \
@@ -76,48 +69,74 @@ curl -X POST \
   --output output.pdf
 ```
 
-## 构建前提
+### `POST /api/v1/convert-to-pdf/batch`
 
-在构建镜像前，请确认根目录存在以下文件：
-
-- `Office.conf`
-
-当前 `Dockerfile` 会默认从 WPS Linux 官方下载页解析出的安装包地址下载 `.deb`。
-如果你想固定到自己的镜像源或本地文件服务器，可以在构建时覆盖 `WPS_DEB_URL_BASE`。
-
-## 构建镜像
-
-交互式构建脚本：
+上传多个文件并返回 ZIP。
 
 ```bash
-./scripts/build_image.sh
+curl -X POST \
+  -F "files=@./a.docx" \
+  -F "files=@./b.pptx" \
+  -F "files=@./c.xlsx" \
+  http://127.0.0.1:8000/api/v1/convert-to-pdf/batch \
+  --output outputs.zip
 ```
 
-直接构建：
+## 支持格式
+
+- Writer: `.doc`, `.docx`
+- Presentation: `.ppt`, `.pptx`
+- Spreadsheet: `.xls`, `.xlsx`
+
+## 目录结构
+
+```text
+.
+├── app/
+│   ├── adapters/
+│   ├── api/
+│   ├── services/
+│   └── utils/
+├── docker/
+├── scripts/
+├── Dockerfile
+├── Office.conf
+├── requirements.txt
+└── README.md
+```
+
+## 运行方式
+
+### 构建镜像
+
+最简单的方式：
 
 ```bash
 docker build -t wps-api-service:local .
 ```
 
-使用自定义安装包地址：
+也可以使用交互式脚本：
+
+```bash
+./scripts/build_image.sh
+```
+
+当前 `Dockerfile` 默认会：
+
+- 下载 WPS Linux 安装包
+- 下载 `https://software.cdn.vect.one/Fonts.zip`
+- 把中文字体打进镜像
+
+如果你要替换下载源，可以覆盖下面两个构建参数：
 
 ```bash
 docker build \
   --build-arg WPS_DEB_URL_BASE=https://your-mirror.example.com/wps-office.deb \
+  --build-arg FONTS_ZIP_URL=https://your-cdn.example.com/Fonts.zip \
   -t wps-api-service:local .
 ```
 
-## 运行容器
-
-```bash
-docker run --rm \
-  -p 8000:8000 \
-  -e DISPLAY=:99 \
-  -e XDG_RUNTIME_DIR=/workspace/runtime \
-  wps-api-service:local
-```
-
-如果想持久化任务目录，可以挂载卷：
+### 运行容器
 
 ```bash
 docker run --rm \
@@ -126,58 +145,32 @@ docker run --rm \
   wps-api-service:local
 ```
 
-## 快速验证
+## 本地调试
 
-### 仅验证健康检查
-
-```bash
-curl http://127.0.0.1:8000/api/v1/healthz
-curl http://127.0.0.1:8000/api/v1/readyz
-```
-
-### 验证单文件转 PDF
+如果本机已经具备完整 Linux WPS 运行时，可以直接启动 API：
 
 ```bash
-curl -X POST \
-  -F "file=@./example.docx" \
-  http://127.0.0.1:8000/api/v1/convert-to-pdf \
-  --output output.pdf
+./scripts/run_local_api.sh
 ```
 
-## 本地开发说明
-
-如果你是在一台已经准备好 WPS、Xvfb、dbus、`pywpsrpc` 的 Linux 环境中本地调试，可以直接运行：
+快速烟测：
 
 ```bash
-python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+./scripts/smoke_test_api.sh
+./scripts/smoke_test_api.sh tests/files/经责审计报告示例.docx
 ```
-
-如果只是做服务层代码调试，没有完整 WPS 环境：
-
-- `healthz` 可验证 API 启动
-- `readyz` 和真实转换会依赖运行环境
 
 ## 环境变量
 
-支持以下环境变量：
+- `WPS_WORKSPACE_ROOT`: 工作目录根路径，默认 `/workspace`
+- `WPS_CONVERSION_TIMEOUT_SECONDS`: 转换超时秒数，默认 `120`
+- `WPS_CLEANUP_MAX_AGE_SECONDS`: 历史任务清理阈值，默认 `86400`
+- `WPS_MAX_UPLOAD_SIZE_BYTES`: 上传大小上限，默认 `52428800`
+- `WPS_BATCH_MAX_FILES`: 批量文件数上限，默认 `10`
 
-- `WPS_WORKSPACE_ROOT`：工作目录根路径，默认 `/workspace`
-- `WPS_CONVERSION_TIMEOUT_SECONDS`：转换超时秒数，默认 `120`
-- `WPS_CLEANUP_MAX_AGE_SECONDS`：历史任务清理阈值，默认 `86400`
-- `WPS_MAX_UPLOAD_SIZE_BYTES`：上传大小上限，默认 `52428800`
-- `WPS_BATCH_MAX_FILES`：批量文件数上限，默认 `10`
-- `WPS_PDF_USE_GHOSTSCRIPT`：是否执行 Ghostscript 重写，默认 `true`
+## 当前实现边界
 
-## 已知限制
-
-当前版本仍保持 KISS 边界，限制包括：
-
-- 单实例内同文档族转换串行执行
-- 还未加入 API Key 鉴权
-- 还未加入异步任务队列
-- 还未支持部分成功的批量返回
-
-## 参考文档
-
-- 研究分析：`docs/wps-server-research.md`
-- 开发方案：`docs/api-service-development-plan.md`
+- 单实例内同文档族串行执行，避免 WPS 自动化通道互相干扰
+- 批量接口是受控并发，不保证部分成功返回
+- 当前没有鉴权、队列、重试中心和任务持久化
+- 如果字体缺失或字体嵌入权限异常，输出体积与兼容性会明显变差
