@@ -56,6 +56,8 @@ class ConversionJobResult:
     input_filename: str
     output_filename: str
     document_family: str
+    queue_wait_ms: int
+    convert_ms: int
     duration_ms: int
     process_pid: int | None
 
@@ -196,6 +198,7 @@ class ConversionService:
 
         try:
             async with route.lock:
+                lock_acquired_at = time.perf_counter()
                 details = await asyncio.wait_for(
                     asyncio.to_thread(
                         route.adapter.convert_to_pdf,
@@ -215,7 +218,10 @@ class ConversionService:
             cleanup_job_dir(job_paths.job_dir)
             raise WpsConversionError("conversion completed without output file")
 
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        finished_at = time.perf_counter()
+        queue_wait_ms = int((lock_acquired_at - started_at) * 1000)
+        convert_ms = int((finished_at - lock_acquired_at) * 1000)
+        duration_ms = int((finished_at - started_at) * 1000)
         write_job_metadata(
             job_paths,
             {
@@ -225,15 +231,19 @@ class ConversionService:
                 "inputSize": get_file_size(job_paths.input_path),
                 "outputFilename": output_filename,
                 "outputSize": get_file_size(job_paths.output_path),
+                "queueWaitMs": queue_wait_ms,
+                "convertMs": convert_ms,
                 "durationMs": duration_ms,
                 "processPid": details.process_pid,
                 "status": "succeeded",
             },
         )
         self.logger.info(
-            "conversion_succeeded job_id=%s family=%s duration_ms=%s pid=%s",
+            "conversion_succeeded job_id=%s family=%s queue_wait_ms=%s convert_ms=%s duration_ms=%s pid=%s",
             job_paths.job_id,
             route.document_family,
+            queue_wait_ms,
+            convert_ms,
             duration_ms,
             details.process_pid,
         )
@@ -244,6 +254,8 @@ class ConversionService:
             input_filename=input_filename,
             output_filename=output_filename,
             document_family=route.document_family,
+            queue_wait_ms=queue_wait_ms,
+            convert_ms=convert_ms,
             duration_ms=duration_ms,
             process_pid=details.process_pid,
         )
@@ -276,6 +288,8 @@ class ConversionService:
                     "documentFamily": result.document_family,
                     "inputFilename": result.input_filename,
                     "outputFilename": result.output_filename,
+                    "queueWaitMs": result.queue_wait_ms,
+                    "convertMs": result.convert_ms,
                     "durationMs": result.duration_ms,
                     "processPid": result.process_pid,
                     "status": "succeeded",
