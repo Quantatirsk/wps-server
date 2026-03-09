@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_image_name="wps-api-service"
+default_image_name="quantatrisk/wps-api-service"
 default_image_tag="latest"
+default_dockerfile_path="docker/Dockerfile"
 
 read -r -p "镜像名 [${default_image_name}]: " image_name
 image_name="${image_name:-$default_image_name}"
@@ -13,10 +14,10 @@ image_tag="${image_tag:-$default_image_tag}"
 read -r -p "是否使用 --no-cache 构建? [y/N]: " no_cache_answer
 no_cache_answer="${no_cache_answer:-N}"
 
-read -r -p "是否覆盖 WPS_DEB_URL_BASE? 留空则使用 Dockerfile 默认值: " wps_deb_url_base
-read -r -p "是否覆盖 FONTS_ZIP_URL? 留空则使用 Dockerfile 默认值: " fonts_zip_url
+read -r -p "是否覆盖 WPS_DEB_URL_BASE? 留空则使用 docker/Dockerfile 默认值: " wps_deb_url_base
+read -r -p "是否覆盖 FONTS_ZIP_URL? 留空则使用 docker/Dockerfile 默认值: " fonts_zip_url
 
-build_cmd=(docker build -t "${image_name}:${image_tag}")
+build_cmd=(docker build -f "${default_dockerfile_path}" -t "${image_name}:${image_tag}")
 
 case "${no_cache_answer}" in
   y|Y|yes|YES)

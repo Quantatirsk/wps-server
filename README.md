@@ -98,9 +98,11 @@ curl -X POST \
 │   ├── services/
 │   └── utils/
 ├── docker/
+│   ├── conf/
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── *.sh
 ├── scripts/
-├── Dockerfile
-├── Office.conf
 ├── requirements.txt
 └── README.md
 ```
@@ -112,7 +114,7 @@ curl -X POST \
 最简单的方式：
 
 ```bash
-docker build -t wps-api-service:local .
+docker build -f docker/Dockerfile -t quantatrisk/wps-api-service:local .
 ```
 
 也可以使用交互式脚本：
@@ -121,7 +123,7 @@ docker build -t wps-api-service:local .
 ./scripts/build_image.sh
 ```
 
-当前 `Dockerfile` 默认会：
+当前 `docker/Dockerfile` 默认会：
 
 - 下载 WPS Linux 安装包
 - 下载 `https://software.cdn.vect.one/Fonts.zip`
@@ -131,9 +133,10 @@ docker build -t wps-api-service:local .
 
 ```bash
 docker build \
+  -f docker/Dockerfile \
   --build-arg WPS_DEB_URL_BASE=https://your-mirror.example.com/wps-office.deb \
   --build-arg FONTS_ZIP_URL=https://your-cdn.example.com/Fonts.zip \
-  -t wps-api-service:local .
+  -t quantatrisk/wps-api-service:local .
 ```
 
 ### 运行容器
@@ -142,7 +145,53 @@ docker build \
 docker run --rm \
   -p 8000:8000 \
   -v $(pwd)/workspace:/workspace \
-  wps-api-service:local
+  quantatrisk/wps-api-service:local
+```
+
+### 使用 Docker Compose 启动集群
+
+当前远程 `8 workers` 部署，本质上是用多个 `docker run` 手工拉起：
+
+- 1 个 dispatcher
+- N 个 worker
+- 一个内部网络
+
+现在仓库里已经补上更适合长期维护的 `docker/docker-compose.yml`，推荐以后优先用它。
+
+先构建镜像，再启动 compose。`docker/docker-compose.yml` 本身不负责构建镜像。
+
+最简单的启动方式：
+
+```bash
+./scripts/build_image.sh
+WPS_WORKER_COUNT=8 ./scripts/compose_up.sh
+```
+
+如果你更喜欢直接用 `docker compose` 命令：
+
+```bash
+export WPS_WORKER_COUNT=8
+docker compose -f docker/docker-compose.yml up -d --scale wps-worker=$WPS_WORKER_COUNT
+```
+
+默认行为：
+
+- `wps-api-service`: 对外 dispatcher，默认暴露到 `18000`
+- `wps-worker`: 可横向扩容的实际转换节点
+- `wps-worker-lb`: 内部轻量负载均衡，仅给 dispatcher 使用
+
+常用环境变量：
+
+- `WPS_WORKER_COUNT`: worker 数量，默认 `8`
+- `WPS_API_PORT`: 对外端口，默认 `18000`
+- `WPS_DISPATCHER_REQUEST_TIMEOUT_SECONDS`: dispatcher 到 worker 超时，默认 `180`
+- `WPS_BATCH_MAX_FILES`: batch 最大文件数，默认 `10`
+- `WPS_IMAGE`: compose 使用的镜像名，默认 `quantatrisk/wps-api-service:latest`
+
+停止并清理：
+
+```bash
+docker compose -f docker/docker-compose.yml down --remove-orphans
 ```
 
 ## 本地调试

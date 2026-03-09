@@ -1,0 +1,48 @@
+name: wps-api-service
+
+services:
+  wps-api-service:
+    image: ${WPS_IMAGE:-quantatrisk/wps-api-service:latest}
+    restart: unless-stopped
+    ports:
+      - "${WPS_API_PORT:-18000}:8000"
+    environment:
+      WPS_WORKSPACE_ROOT: /workspace
+      WPS_WORKER_COUNT: "${WPS_WORKER_COUNT:-8}"
+      WPS_BATCH_WORKER_BASE_URL: http://wps-worker-lb:8000
+      WPS_DISPATCHER_REQUEST_TIMEOUT_SECONDS: "${WPS_DISPATCHER_REQUEST_TIMEOUT_SECONDS:-180}"
+      WPS_BATCH_MAX_FILES: "${WPS_BATCH_MAX_FILES:-10}"
+    entrypoint: ["/dispatcher-entrypoint.sh"]
+    command: ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      - wps-worker-lb
+    networks:
+      - wps-net
+
+  wps-worker:
+    image: ${WPS_IMAGE:-quantatrisk/wps-api-service:latest}
+    restart: unless-stopped
+    environment:
+      WPS_WORKSPACE_ROOT: /workspace
+      WPS_BATCH_WORKER_URLS: ""
+      WPS_BATCH_MAX_FILES: "${WPS_BATCH_MAX_FILES:-10}"
+    expose:
+      - "8000"
+    networks:
+      - wps-net
+
+  wps-worker-lb:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - wps-worker
+    volumes:
+      - ./conf/nginx.worker-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - "8000"
+    networks:
+      - wps-net
+
+networks:
+  wps-net:
+    driver: bridge
