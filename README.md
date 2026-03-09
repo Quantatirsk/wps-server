@@ -199,9 +199,6 @@ That means:
 - `WPS_WORKER_COUNT`
   - default: `auto`
   - local writer worker count, resolved by the rules described above
-- `WPS_WARM_SESSION_IDLE_TTL_SECONDS`
-  - default: `600`
-  - recycle a local warm session after this much idle time
 - `WPS_WARM_SESSION_MAX_JOBS`
   - default: `100`
   - recycle a local warm session after this many completed jobs

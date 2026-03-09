@@ -44,7 +44,6 @@ class Settings:
     max_upload_size_bytes: int
     batch_max_files: int
     writer_worker_count: int
-    warm_session_idle_ttl_seconds: int
     warm_session_max_jobs: int
     warm_session_prewarm_enabled: bool
 
@@ -72,9 +71,6 @@ def get_settings() -> Settings:
         ),
         batch_max_files=int(os.getenv("WPS_BATCH_MAX_FILES", "10")),
         writer_worker_count=writer_worker_count,
-        warm_session_idle_ttl_seconds=int(
-            os.getenv("WPS_WARM_SESSION_IDLE_TTL_SECONDS", "600")
-        ),
         warm_session_max_jobs=int(
             os.getenv("WPS_WARM_SESSION_MAX_JOBS", "100")
         ),

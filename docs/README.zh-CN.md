@@ -248,9 +248,6 @@ Swagger UI 路径是 `/docs`。
 - `WPS_WORKER_COUNT`
   - 默认值：`auto`
   - 本地 `writer` worker 数量
-- `WPS_WARM_SESSION_IDLE_TTL_SECONDS`
-  - 默认值：`600`
-  - 会话空闲回收阈值
 - `WPS_WARM_SESSION_MAX_JOBS`
   - 默认值：`100`
   - 单会话累计处理文件数达到阈值后回收
