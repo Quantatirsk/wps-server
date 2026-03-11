@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WPS_BATCH_MAX_FILES=10
 
 ARG WPS_DEB_URL_BASE=""
-ARG WPS_DEB_URL_AMD64="https://wps-linux-personal.wpscdn.cn/wps/download/ep/Linux2023/24722/wps-office_12.1.2.24722.AK.preread.sw_612408_amd64.deb"
+ARG WPS_DEB_URL_AMD64="https://github.com/Rongronggg9/wps-office-repack/releases/download/v12.1.0.17885/wps-office_12.1.0.17885_amd64.deb"
 ARG WPS_DEB_URL_ARM64="https://pubwps-wps365-obs.wpscdn.cn/download/Linux/24722/wps-office_12.1.2.24722.AK.preread.sw_612444_arm64.deb"
 ARG PYWPSRPC_WHEEL_URL=""
 ARG PYWPSRPC_WHEEL_URL_ARM64="https://raw.githubusercontent.com/kevinhonor/pywpsrpc/master/packages/aarch64/pywpsrpc-2.3.9-cp310-cp310-linux_aarch64.whl"
